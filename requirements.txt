@@ -1,0 +1,7 @@
+matplotlib
+openpyxl
+pandas
+PyQt6
+scipy
+tornado
+yfinance

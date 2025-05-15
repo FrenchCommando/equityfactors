@@ -43,7 +43,7 @@ def get_returns(ticker):
 
 def get_components():
     file_path = "holdings-daily-us-en-spy.xlsx"
-    df = pd.read_excel(file_path, skiprows=4).head(100)
+    df = pd.read_excel(file_path, skiprows=4).head(50)
     df = df.loc[df["Name"] != "US DOLLAR"]
     # print(df)
     return list(map(lambda x: x.replace(".", "-"), df['Ticker'].dropna().values)), list(map(lambda x: x * 0.01, df['Weight'].dropna().values))
@@ -75,7 +75,15 @@ def get_decomposition(data, weights):
     plt.plot(data.index, np.cumsum(portfolio), label="PnL", color=portfolio_color)
     plt.axhline(y=portfolio_std, label="Std", linestyle='--', color=portfolio_color)
 
-    covar = np.cov(data.T)
+    date_cutoff = pd.Timestamp(dt.date(2025, 4, 1), tz="US/Eastern")
+    # print(data)
+    data0 = data.loc[:date_cutoff]
+    data1 = data.loc[date_cutoff:]
+    # print(data0)
+    # print(data1)
+
+    # use data0 for factors
+    covar = np.cov(data0.T)
     # print(covar)
     print(covar.shape)
 
@@ -85,8 +93,18 @@ def get_decomposition(data, weights):
     print(eigenvalues)
     print(eigenvectors.T[0])
 
+    portfolio0 = np.dot(data0, norm_weights)
+    portfolio1 = np.dot(data1, norm_weights)
+    portfolio_var0 = np.var(portfolio0)
+    portfolio_var1 = np.var(portfolio1)
+    portfolio_std0 = np.sqrt(portfolio_var0)
+    portfolio_std1 = np.sqrt(portfolio_var1)
     out_data = dict(
-        Portfolio=dict(Std=portfolio_std, Mean=np.mean(portfolio)),
+        Portfolio=dict(
+            Std=portfolio_std, Mean=np.mean(portfolio),
+            Std0=portfolio_std0, Mean0=np.mean(portfolio0),
+            Std1=portfolio_std1, Mean1=np.mean(portfolio1),
+        ),
     )
 
     cmap = matplotlib.colormaps['Set1']  # .resampled(10)
@@ -97,7 +115,18 @@ def get_decomposition(data, weights):
         var_i = np.var(p_i)
         std_i = np.sqrt(var_i)
 
-        out_data[f"{i}"] = dict(Std=std_i, Mean=np.mean(p_i))
+        p_i_0 = np.dot(data0, v)
+        p_i_1 = np.dot(data1, v)
+        var_i_0 = np.var(p_i_0)
+        std_i_0 = np.sqrt(var_i_0)
+        var_i_1 = np.var(p_i_1)
+        std_i_1 = np.sqrt(var_i_1)
+
+        out_data[f"{i}"] = dict(
+            Std=std_i, Mean=np.mean(p_i),
+            Std0=std_i_0, Mean0=np.mean(p_i_0),
+            Std1=std_i_1, Mean1=np.mean(p_i_1),
+        )
 
         # ignoring numerical noise, criteria on eigenvalue should be the same as criteria on std
         # if eigen_value < 1e-3:
@@ -150,6 +179,28 @@ def get_decomposition(data, weights):
     plt.legend()
     plt.ylabel("Sharpe")
     plt.xlabel("Std(Annual)")
+    plt.minorticks_on()
+    plt.grid(visible=True, alpha=0.8, which='major')
+    plt.grid(visible=True, alpha=0.2, which='minor')
+
+    fig, ax = plt.subplots(num="FactorsCross")
+    for label, d_data in out_data.items():
+        norm_data_std_0 = d_data["Std0"] * np.sqrt(252)
+        norm_data_std_1 = d_data["Std1"] * np.sqrt(252)
+        if norm_data_std_0 < 3e-1:
+            continue
+        # rotation so that initial sharpe is positive
+        sharpe_0 = 252 * d_data["Mean0"] / norm_data_std_0 * np.sign(d_data["Mean0"])
+        sharpe_1 = 252 * d_data["Mean1"] / norm_data_std_1 * np.sign(d_data["Mean0"])
+        color = cmap(int(label)) if label != "Portfolio" else "black"
+        plt.scatter(sharpe_0, sharpe_1, label=label, color=color)
+    ax.set_autoscale_on(False)
+    id_iota = np.linspace(-10, 10, 100)
+    plt.plot(id_iota, id_iota, label=None, linestyle="--", color='red')
+    # ax.xaxis.set_major_formatter(mtick.PercentFormatter(xmax=1))
+    plt.legend()
+    plt.ylabel("Sharpe1")
+    plt.xlabel("Sharpe0")
     plt.minorticks_on()
     plt.grid(visible=True, alpha=0.8, which='major')
     plt.grid(visible=True, alpha=0.2, which='minor')

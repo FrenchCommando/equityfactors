@@ -1,16 +1,16 @@
+import os
 import datetime as dt
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import os.path
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 from scipy.optimize import minimize
 
 import yfinance as yf
 
-import matplotlib.ticker as mtick
-import matplotlib
-matplotlib.use('WebAgg')
-# matplotlib.use('qtagg')
+# matplotlib.use('WebAgg')
+matplotlib.use('qtagg')
 
 
 data_folder = "data"
@@ -43,7 +43,9 @@ def get_returns(ticker):
 
 def get_components():
     file_path = "holdings-daily-us-en-spy.xlsx"
-    df = pd.read_excel(file_path, skiprows=4).head(2)
+    df = pd.read_excel(file_path, skiprows=4).head(100)
+    df = df.loc[df["Name"] != "US DOLLAR"]
+    # print(df)
     return list(map(lambda x: x.replace(".", "-"), df['Ticker'].dropna().values)), list(map(lambda x: x * 0.01, df['Weight'].dropna().values))
 
 def get_all_components():
@@ -53,19 +55,25 @@ def get_all_components():
 
 
 def get_decomposition(data, weights):
-    portfolio = np.dot(data, weights)
     n = len(weights)
+    norm_w = np.dot(weights, weights)
+    norm_weights = weights / np.sqrt(norm_w)  # norm means euclidean norm == 1, not sum == 1
+    norm_w_n = np.dot(norm_weights, norm_weights)
+    portfolio = np.dot(data, norm_weights)
     # print(portfolio)
     portfolio_var = np.var(portfolio)
     portfolio_std = np.sqrt(portfolio_var)
+    print("Norm", norm_w_n)
     print("Var", portfolio_var)
     print("Std", portfolio_std)
     fig, ax = plt.subplots(num="Portfolio")
     # cum_return = (portfolio + 1).cumprod() - 1
     # print(cum_return)
     # plt.plot(list(enumerate(cum_return)), cum_return, label="PnL")
-    plt.plot(data.index, list(portfolio), label="PnL")
-    plt.axhline(y=portfolio_std, label="Std")
+    portfolio_color = 'black'
+    # print(portfolio)
+    plt.plot(data.index, np.cumsum(portfolio), label="PnL", color=portfolio_color)
+    plt.axhline(y=portfolio_std, label="Std", linestyle='--', color=portfolio_color)
 
     covar = np.cov(data.T)
     # print(covar)
@@ -77,23 +85,36 @@ def get_decomposition(data, weights):
     print(eigenvalues)
     print(eigenvectors.T[0])
 
+    out_data = dict(
+        Portfolio=dict(Std=portfolio_std, Mean=np.mean(portfolio)),
+    )
+
+    cmap = matplotlib.colormaps['Set1']  # .resampled(10)
     for i, v in enumerate(eigenvectors.T):
         eigen_value = eigenvalues[i]
-        if eigen_value < 1e-4:
-            continue
         n_i = np.dot(v, v)
         p_i = np.dot(data, v)
         var_i = np.var(p_i)
         std_i = np.sqrt(var_i)
-        # print(f"N{i}  ", n_i)
+
+        out_data[f"{i}"] = dict(Std=std_i, Mean=np.mean(p_i))
+
+        # ignoring numerical noise, criteria on eigenvalue should be the same as criteria on std
+        # if eigen_value < 1e-3:
+        if std_i < 3.5e-2:  # look at the graph to adjust the cutoff
+            continue
+
+        print(f"N{i}  ", n_i)
         # print(f"Var{i}  ", var_i)
         # print(f"Var{i}*n", var_i * (n))
         print(f"Std  {i}", std_i)
         print(f"EigQr{i}", np.sqrt(eigen_value))
+
         # print(f"Eigen{i}", eigen_value)
         print()
-        plt.plot(data.index, list(p_i), label=f"PnL{i}")
-        plt.axhline(y=std_i, label=f"Std{i}")
+        color = cmap(i)
+        plt.plot(data.index, np.cumsum(p_i), label=f"PnL{i}", color=color)
+        plt.axhline(y=std_i, label=f"Std{i}", linestyle='--', color=color)
 
 
     # result from optimization
@@ -117,6 +138,22 @@ def get_decomposition(data, weights):
     plt.grid(visible=True, alpha=0.8, which='major')
     plt.grid(visible=True, alpha=0.2, which='minor')
 
+    fig, ax = plt.subplots(num="Factors")
+    for label, d_data in out_data.items():
+        norm_data_std = d_data["Std"] * np.sqrt(252)
+        if norm_data_std < 5e-1:
+            continue
+        sharpe = 252 * d_data["Mean"] / norm_data_std
+        color = cmap(int(label)) if label != "Portfolio" else "black"
+        plt.scatter(norm_data_std, sharpe, label=label, color=color)
+    ax.xaxis.set_major_formatter(mtick.PercentFormatter(xmax=1))
+    plt.legend()
+    plt.ylabel("Sharpe")
+    plt.xlabel("Std(Annual)")
+    plt.minorticks_on()
+    plt.grid(visible=True, alpha=0.8, which='major')
+    plt.grid(visible=True, alpha=0.2, which='minor')
+
 
 def main():
     # ticker_symbols = ["AAPL", "AMZN", "NVDA", "CAT"]
@@ -130,4 +167,12 @@ def main():
 
 
 if __name__ == '__main__':
+    # import numpy as np
+    # import matplotlib.pyplot as plt
+    # import scipy
+    # x = np.linspace(-4, 4, 100)
+    # y = scipy.stats.norm.cdf(x)
+    # plt.plot(x, y)
+    # plt.show()
+
     main()
